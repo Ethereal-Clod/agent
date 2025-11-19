@@ -1,0 +1,17 @@
+# 文件路径: D:/agent/backend/requirements.txt
+
+# FastAPI & Server
+fastapi
+uvicorn[standard]
+
+# Database ORM & Connection
+sqlalchemy
+alembic
+databases[mysql]
+pymysql
+
+# Password & JWT Security
+python-jose[cryptography]
+
+# Settings Management
+pydantic-settings
