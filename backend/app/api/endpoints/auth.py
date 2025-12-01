@@ -16,6 +16,7 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import LoginRequest, Token, UserCreate, UserRead
+from app.models.electricity_account import ElectricityAccount
 
 router = APIRouter()
 
@@ -33,10 +34,23 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)) -> UserRea
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    new_user = User(username=user_in.username, address=user_in.address, hashed_password=hashed_password)
+    new_user = User(username=user_in.username, address=user_in.address, password=hashed_password)
     db.add(new_user)
+    db.flush()  # 立即获取 user.id，但不提交事务
+
+    # 2. 自动创建用电账户
+    account_number = f"A{new_user.id:06d}"  # 生成账号如 ACC000001
+    electricity_account = ElectricityAccount(
+        user_id=new_user.id,
+        account_number=account_number,
+        peak_rate=0.8,    # 默认峰值电价
+        valley_rate=0.3   # 默认谷值电价
+    )
+    db.add(electricity_account)
+    
+    # 3. 提交事务
     db.commit()
-    db.refresh(new_user)
+    db.refresh(new_user)  # 刷新用户数据（包含关系）
     return new_user
 
 
@@ -48,7 +62,7 @@ def login(login_req: LoginRequest, db: Session = Depends(get_db)) -> Token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码长度不能超过 30 个字符")
 
     user = db.query(User).filter(User.username == login_req.username).first()
-    if user is None or not verify_password(login_req.password, user.hashed_password):
+    if user is None or not verify_password(login_req.password, user.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     expires = timedelta(minutes=settings.access_token_expire_minutes)

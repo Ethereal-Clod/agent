@@ -98,3 +98,5 @@ CREATE TABLE `chat_history` (
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`),
   INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聊天记录表';
+
+DROP TABLE IF EXISTS users;

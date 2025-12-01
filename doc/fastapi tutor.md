@@ -75,9 +75,14 @@ uvicorn app.main:app --reload
 | `app/db/__init__.py` | 数据库包占位。 | （无） |
 | `app/db/base.py` | SQLAlchemy `Base` 声明。 | `Base = declarative_base()` |
 | `app/db/session.py` | 构建数据库引擎、Session 工厂，并提供 FastAPI 依赖。 | `_build_connect_args()`、`engine`、`SessionLocal`、`get_db()` |
-| `app/models/__init__.py` | 导出 ORM 模型。 | `from .user import User` |
-| `app/models/user.py` | `users` 表 ORM 模型，包含用户名、哈希密码、地址、时间戳。 | `class User(Base)` |
+| `app/models/__init__.py` | 导出 ORM 模型。 | `from .user import User`、`from .appliance import Appliance, ApplianceType` |
+| `app/models/user.py` | `users` 表 ORM 模型，包含用户名、哈希密码、地址、时间戳，与电器建立一对多关系。 | `class User(Base)`、`appliances = relationship("Appliance", back_populates="owner")` |
+| `app/models/appliance.py` | `appliances` 表 ORM 模型，包含电器名称、类型、开关状态、功率等，关联到用户。 | `class Appliance(Base)`、`class ApplianceType(str, enum.Enum)` |
 | `app/schemas/user.py` | Pydantic 模型：通用字段、注册体、响应体、登录请求、Token。 | `UserCreate`、`UserRead`、`LoginRequest`、`Token`、`TokenData` |
+| `app/schemas/appliance.py` | Pydantic 模型：创建电器、电器响应、控制请求、控制响应。 | `ApplianceCreate`、`ApplianceOut`、`ApplianceControl`、`ControlResponse` |
+| `app/services/__init__.py` | 服务层包标识。 | （无） |
+| `app/services/mock_ai.py` | 模拟 AI 服务，分析电器操作并返回智能建议（占位实现，后续替换为真实 Agent）。 | `analyze_appliance_action(appliance_name, action, power) -> str` |
+| `app/api/endpoints/appliances.py` | 电器管理路由：添加电器、查询列表、控制开关（AI 介入）。 | `create_appliance()`、`read_appliances()`、`control_appliance()` |
 | `app/test.py` | 独立示例应用/健康检查（演示性质）。 | `app = FastAPI(...)`、`@app.get("/")` |
 
 > 提示：添加新模块时，可沿用“模型（models）+模式（schemas）+路由（api/endpoints）+依赖（api/deps）”的结构，保持一致的代码组织方式。
@@ -94,6 +99,69 @@ uvicorn app.main:app --reload
 
 > 密码策略：长度 6~30 个字符，注册/登录时都会校验；内部使用 SHA-256 后截取 30 个字符存储，因此数据库 `users.password` 字段为 `VARCHAR(30)`。
 
-这份手册会随着后续模块（仪表盘、智能控制、聊天）的实现不断扩充。遇到新的基础概念，也请在这里补充，便于后来者快速融入。
+---
+
+## 5. 新增模块：电器管理与智能控制
+
+### 5.1 数据模型设计
+
+**Appliance 模型** (`app/models/appliance.py`)
+- 与 `User` 建立多对一关系（一个用户可以有多个电器）
+- 使用 `ApplianceType` 枚举定义电器类型（ac、fridge、light、tv、heater、other）
+- 关键字段：`name`（名称）、`type`（类型）、`is_on`（开关状态）、`power_rating_kw`（功率）
+
+**关系定义**
+```python
+# User 模型中添加
+appliances = relationship("Appliance", back_populates="owner")
+
+# Appliance 模型中添加
+user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+owner = relationship("User", back_populates="appliances")
+```
+
+### 5.2 API 端点说明
+
+**`POST /api/appliances`** - 添加新电器
+- 功能：创建电器记录，绑定到当前登录用户
+- 依赖：`get_current_user`（确保用户已登录）
+- 返回：创建的电器信息（`ApplianceOut`）
+
+**`GET /api/appliances`** - 获取电器列表
+- 功能：查询当前用户的所有电器
+- 筛选：自动过滤，只返回属于当前用户的电器
+- 返回：电器列表（`List[ApplianceOut]`）
+
+**`POST /api/appliances/{appliance_id}/control`** - 控制电器开关
+- 功能：更新电器开关状态，并调用 AI 服务分析
+- 流程：
+  1. 验证电器存在且属于当前用户
+  2. 更新 `is_on` 状态
+  3. 调用 `analyze_appliance_action()` 获取 AI 建议
+  4. 提交事务并返回结果
+- 返回：控制结果 + AI 建议消息（`ControlResponse`）
+
+### 5.3 模拟 AI 服务
+
+**`app/services/mock_ai.py`** 中的 `analyze_appliance_action()` 函数：
+- 输入：电器名称、操作类型（"ON"/"OFF"）、功率
+- 逻辑：
+  - 关闭操作：返回节能提示
+  - 开启操作：随机选择一个智能建议（如高峰提示、温度建议等）
+- 后续：此函数将被替换为真实的 LangGraph Agent 调用
+
+### 5.4 开发流程总结
+
+实现新模块的标准流程：
+1. **定义 ORM 模型** (`models/`) → 数据库表结构
+2. **定义 Pydantic schemas** (`schemas/`) → 请求/响应验证
+3. **编写业务逻辑** (`services/`) → 核心算法或 AI 调用
+4. **创建 API 端点** (`api/endpoints/`) → HTTP 接口
+5. **注册路由** (`main.py`) → 让 FastAPI 识别新接口
+6. **更新文档** → API 文档、README、本手册
+
+---
+
+这份手册会随着后续模块（仪表盘、真实 AI Agent、聊天）的实现不断扩充。遇到新的基础概念，也请在这里补充，便于后来者快速融入。
 
 
