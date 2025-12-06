@@ -76,6 +76,29 @@
 
 > 所有 `/api/appliances/*` 接口都需要先登录获取 Token，并在请求头中携带 `Authorization: Bearer <token>`
 
+### 📊 仪表盘数据模块 (Dashboard Data)
+
+| Method | URL                              | 描述                     |
+|--------|----------------------------------|--------------------------|
+| GET    | `/api/data/summary`              | 获取今日概览（KPI Cards） |
+| GET    | `/api/data/consumption/trend`    | 获取用电趋势（折线图数据） |
+| GET    | `/api/data/consumption/factors`   | 获取用电影响因素（AI 分析）|
+| GET    | `/api/data/weather`               | 获取天气数据             |
+| GET    | `/api/data/electricity-rate`     | 获取当前电价状态          |
+
+**功能特点:**
+- **今日概览**：实时计算当前总功率、今日预计电费、本月累计用电、开启电器数量
+- **用电趋势**：支持 24小时/一周/一个月三种时间范围，返回格式匹配前端图表组件
+- **影响因素分析**：AI 分析用电影响因素（天气、大功率电器、基础待机、峰时用电）
+- **天气数据**：模拟天气信息（温度、天气状况、湿度），后续可接入真实天气 API
+- **电价状态**：根据当前时间自动判断峰值/平值/谷值电价
+
+**数据格式说明:**
+- 用电趋势数据单位：**瓦特 (W)**，格式：`{data: [{time: string, usage: number}]}`
+- 所有接口均需要认证（Bearer Token）
+
+> 所有 `/api/data/*` 接口都需要先登录获取 Token，并在请求头中携带 `Authorization: Bearer <token>`
+
 ### 请求示例
 ```http
 POST /api/auth/register
@@ -165,13 +188,15 @@ POST /api/appliances/1/control
 - [x] 电器数据模型（ORM）
 - [x] 电器管理 API（添加、列表、控制）
 - [x] 模拟 AI 服务（智能建议）
+- [x] 仪表盘数据接口（用电趋势、KPI 指标、天气、电价）
+- [x] 用电数据模型（ConsumptionData ORM）
 
 ### 🚧 计划中功能
-- [ ] 仪表盘数据接口（用电趋势、KPI 指标）
 - [ ] AI 聊天顾问接口
 - [ ] 真实 AI Agent 集成（LangGraph）
 - [ ] Alembic 数据库迁移管理
-- [ ] 用电数据模拟器
+- [ ] 用电数据模拟器（定期生成真实用电数据）
+- [ ] 真实天气 API 集成
 - [ ] 自动化测试与 CI/CD
 
 ---
@@ -218,4 +243,70 @@ POST /api/appliances/1/control
   - 为用电账单和数据分析功能预留扩展空间
   - 更好的数据隔离和关联完整性
 - **数据库兼容性**：统一使用BIGINT类型，确保MySQL兼容性
+
+### 2025-12-06：仪表盘数据接口实现与前后端联调适配
+- **新增功能**：完整的仪表盘数据接口，支持前端 React 组件的数据需求
+- **技术实现**：
+  - 创建 `ConsumptionData` ORM 模型，支持历史用电数据存储和查询
+  - 实现仪表盘数据接口，包括今日概览、用电趋势、影响因素分析、天气数据、电价状态
+  - 优化数据格式，匹配前端 TypeScript 接口定义（驼峰命名、单位转换等）
+  - 实现智能数据生成逻辑，当数据库无真实数据时自动生成模拟数据
+- **核心文件与函数**：
+  - **`backend/app/models/consumption_data.py`** - 用电数据 ORM 模型
+    - `ConsumptionData` 类：对应 `consumption_data` 表，存储时间片内的总耗电量
+    - 与 `ElectricityAccount` 建立一对多关系
+  - **`backend/app/schemas/dashboard.py`** - 仪表盘 Pydantic 数据模型
+    - `DashboardSummary`：今日概览数据模型（总功率、电费、用电量、开启电器数）
+    - `ChartDataPoint`：图表数据点模型（时间、用电量）
+    - `ConsumptionTrend`：用电趋势响应模型（数据点列表）
+    - `ConsumptionFactors`：用电影响因素响应模型
+    - `Weather`：天气数据模型（温度、天气状况、湿度）
+    - `ElectricityRate`：电价状态模型（peak/normal/valley）
+  - **`backend/app/api/endpoints/dashboard.py`** - 仪表盘数据接口端点
+    - `get_dashboard_summary()`：获取今日概览
+      - 计算当前总功率（基于开启的电器）
+      - 估算今日电费（基于峰谷电价和电器使用时长）
+      - 查询本月累计用电量
+      - 统计开启的电器数量
+    - `get_consumption_trend()`：获取用电趋势
+      - 支持 24小时/一周/一个月三种时间范围
+      - 优先使用数据库真实数据，无数据时生成模拟数据
+      - 数据单位：瓦特 (W)，格式匹配前端 `ChartDataPoint[]`
+    - `get_consumption_factors()`：获取用电影响因素
+      - AI 分析天气因素、大功率电器、基础待机、峰时用电的影响权重
+      - 自动归一化因子值，使总和为 100%
+      - 生成智能节能建议
+    - `get_weather()`：获取天气数据
+      - 模拟天气信息（温度、天气状况、湿度）
+      - 根据当前时间动态生成，模拟昼夜温度变化
+    - `get_electricity_rate()`：获取电价状态
+      - 根据当前时间自动判断峰值（18-22点）/谷值（0-7点）/平值电价
+    - **辅助函数**：
+      - `_calculate_current_power()`：计算当前总功率
+      - `_estimate_daily_cost()`：估算今日电费
+      - `_get_month_usage()`：获取本月累计用电量
+      - `_generate_mock_trend_data()`：生成模拟趋势数据
+- **文件变更**：
+  - **新建文件**：
+    - `backend/app/models/consumption_data.py` - 用电数据 ORM 模型
+    - `backend/app/schemas/dashboard.py` - 仪表盘 Pydantic 模型
+    - `backend/app/api/endpoints/dashboard.py` - 仪表盘数据接口
+  - **修改文件**：
+    - `backend/app/models/electricity_account.py` - 添加与 `ConsumptionData` 的关系
+    - `backend/app/models/__init__.py` - 导出新模型（ConsumptionData, ElectricityAccount）
+    - `backend/app/schemas/appliance.py` - 修改 `ApplianceOut`，`is_on` 字段使用别名 `isOn` 匹配前端
+    - `backend/app/main.py` - 注册仪表盘路由（`/api/data`）
+- **数据格式适配**：
+  - 用电趋势接口返回格式从 `{range, x_axis, y_axis}` 改为 `{data: [{time, usage}]}`
+  - 数据单位从 `kWh` 转换为 `W`（瓦特），匹配前端图表组件
+  - 电器状态字段使用驼峰命名 `isOn`，匹配前端 TypeScript 接口
+  - 所有时间格式统一为 `HH:MM`（24小时）或 `MM/DD`（日期）
+- **前后端联调**：
+  - 接口响应格式完全匹配前端 React demo 的 TypeScript 接口定义
+  - 支持前端组件独立加载，避免单次请求过大
+  - 提供模拟数据生成，便于前端开发和测试
+- **待改进**：
+  - 当前天气数据为模拟实现，后续可接入真实天气 API（如 OpenWeatherMap）
+  - 用电趋势数据生成逻辑可优化，考虑接入用电数据模拟器定期写入数据库
+  - 影响因素分析可接入真实 AI Agent 进行更精准的分析
 
