@@ -15,3 +15,4 @@ class ElectricityAccount(Base):
     # 关系定义
     user = relationship("User", back_populates="electricity_account")
     appliances = relationship("Appliance", back_populates="account")
+    consumption_records = relationship("ConsumptionData", back_populates="account")

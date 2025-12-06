@@ -27,11 +27,19 @@ def create_appliance(
     current_user: User = Depends(get_current_user),
 ) -> ApplianceOut:
     """添加新电器（用于初始化数据）。"""
+    # 检查用户是否有用电账户
+    if not current_user.electricity_account:
+        # 如果没有，抛出错误或自动创建（这里选择抛出错误）
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户还没有用电账户，请联系管理员"
+        )
+    
     new_appliance = Appliance(
         name=item.name,
         type=item.type,
         power_rating_kw=item.power_rating,
-        user_id=current_user.id,  # 绑定到当前用户
+        account_id=current_user.electricity_account.id,  # ✅ 修改：使用 account_id
     )
     db.add(new_appliance)
     db.commit()
@@ -45,7 +53,13 @@ def read_appliances(
     current_user: User = Depends(get_current_user),
 ) -> List[ApplianceOut]:
     """获取当前用户的电器列表。"""
-    appliances = db.query(Appliance).filter(Appliance.user_id == current_user.id).all()
+    # 通过 electricity_account 关联查询电器
+    if not current_user.electricity_account:
+        return []  # 如果没有账户，返回空列表
+    
+    appliances = db.query(Appliance).filter(
+        Appliance.account_id == current_user.electricity_account.id
+    ).all()
     return appliances
 
 
@@ -57,10 +71,18 @@ def control_appliance(
     current_user: User = Depends(get_current_user),
 ) -> ControlResponse:
     """控制电器开关（AI 介入）。"""
-    # 1. 查询电器
+    if not current_user.electricity_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户还没有用电账户"
+        )
+     # 1. 查询电器 - 通过 account_id 关联
     appliance = (
         db.query(Appliance)
-        .filter(Appliance.id == appliance_id, Appliance.user_id == current_user.id)
+        .filter(
+            Appliance.id == appliance_id, 
+            Appliance.account_id == current_user.electricity_account.id
+        )
         .first()
     )
 

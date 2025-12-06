@@ -21,12 +21,13 @@ class ApplianceOut(BaseModel):
     id: int
     name: str
     type: str
-    is_on: bool
+    isOn: bool = Field(..., alias="is_on", description="电器开关状态")
     power_rating_kw: float
     created_at: datetime
 
     class Config:
         from_attributes = True
+        populate_by_name = True  # 允许使用原始字段名或别名
 
 
 class ApplianceControl(BaseModel):
